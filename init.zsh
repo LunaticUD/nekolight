@@ -1,48 +1,85 @@
-# ------------------------------------------------------------------------------
-# Zimfw Theme: nekolight
-# Ported from oh-my-bash nekolight theme
-# ------------------------------------------------------------------------------
-
-# 1. 开启变量替换，允许在 PROMPT 中解析变量和函数
+# 1. 基础设置
+# 开启变量替换，允许 PROMPT 解析变量
 setopt prompt_subst
 
-# 2. 配置 Zimfw 的 git 模块格式
-# 我们需要让 git 模块只提供纯文本的分支名，不需要它自带颜色或括号
-# 因为颜色逻辑由我们下面的函数控制
-zstyle ':zim:git:info:branch' format '%b'
+# 2. 初始化 git_info 关联数组 (这是 Basher 成功的关键)
+typeset -gA git_info
 
-# 配置 status 格式。
-# 我们不需要它显示具体的符号（如 M, ?），但必须设置它不为空，
-# 这样 zim 才会去检测仓库是否 dirty，从而填充 status 变量供我们在函数中判断
-zstyle ':zim:git:info:status' format '!'
+# 3. 配置 Git 样式
+# 只有当 git-info 函数存在时才运行 (即 .zimrc 中加载了 git 模块)
+if (( ${+functions[git-info]} )); then
+  
+  # [重点逻辑]: 利用 Clean 和 Dirty 来控制颜色
+  # 如果仓库是干净的，%C 会输出绿色代码
+  zstyle ':zim:git-info:clean' format '%B%F{green}'
+  
+  # 如果仓库是脏的 (有修改)，%D 会输出红色代码
+  zstyle ':zim:git-info:dirty' format '%B%F{red}'
+  
+  # 分支名本身只显示名字 (颜色由上面的 clean/dirty 控制)
+  zstyle ':zim:git-info:branch' format '%b'
 
-# 3. 定义 Git 信息生成函数
-# 逻辑：如果仓库是干净的 -> 绿色；如果有修改 -> 红色
-function prompt_nekolight_git() {
-  # 如果当前不在 git 仓库中 (branch key 为空)，则不显示任何内容
-  [[ -z ${zim_git_info_keys[branch]} ]] && return
+  # [核心格式]: 定义 prompt 键的格式
+  # " on " + %C(绿)或%D(红) + 图标 + 分支名 + %f(重置颜色)
+# 修改后 (正确)
+  zstyle ':zim:git-info:keys' format \
+         'prompt' ' on %C%D %b%f'
 
-  local git_symbol=""
-  local git_color='%B%F{green}' # 默认为绿色 (Bold + Green)
+  # 注册钩子，在每次显示提示符前运行 git-info
+  autoload -Uz add-zsh-hook && add-zsh-hook precmd git-info
+fi
 
-  # 检查 status key 是否有内容
-  # 在 Zim 中，如果有文件被修改，zim_git_info_keys[status] 将不会为空
-  if [[ -n ${zim_git_info_keys[status]} ]]; then
-    git_color='%B%F{red}'        # 变为红色 (Bold + Red)
-  fi
-
-  # 对应 Bash 中的逻辑: "on " + Color + Symbol + Branch
-  # 注意：Bash 原版中 "on" 是普通颜色，图标和分支是彩色的
-  echo " on ${git_color} ${git_symbol} ${zim_git_info_keys[branch]}%f%b"
-}
-
-# 4. 组装 PROMPT
-# %B%F{blue}...%f%b : 粗体蓝色
-# %~                : 当前路径 (如 ~)
-# $(...)            : 调用上面的 git 函数
-# \n❯               : 换行 + 箭头符号
-
-# PROMPT='%B%F{blue}%~%f%b$(prompt_nekolight_git)
-PROMPT='%B%F{blue}%~%f%b$(prompt_nekolight_git)
+# 4. 定义 PROMPT
+# 结构：
+# 1. 蓝色路径: %B%F{blue}%~%f%b
+# 2. Git信息:  ${(e)git_info[prompt]} (引用上面配置好的 git 字符串)
+# 3. 换行
+# 4. 状态箭头: %(? ... ) 成功绿，失败红
+PROMPT='%B%F{blue}%~%f%b${(e)git_info[prompt]}
 %(?,%B%F{green}❯%f%b,%B%F{red}❯%f%b) '
-❯ '
+# # ------------------------------------------------------------------------------
+# # Zimfw Theme: nekolight (Optimized for Zsh)
+# # ------------------------------------------------------------------------------
+#
+# # 1. 开启变量替换
+# setopt prompt_subst
+#
+# # 2. 配置 Zimfw Git 模块
+# zstyle ':zim:git:info:branch' format '%b'
+# zstyle ':zim:git:info:status' format '!'
+#
+# # 3. 使用钩子函数更新 Git 信息
+# # 这样避免了在 PROMPT 中使用 $(...) 子进程
+# function prompt_nekolight_precmd() {
+#   # 显式触发 Zim 的 git 信息采集
+#   if (( $+functions[git-info] )); then
+#     git-info
+#   fi
+#
+#   # 构建 Git 提示字符串
+#   _PROMPT_GIT_INFO=""
+#   if [[ -n ${zim_git_info_keys[branch]} ]]; then
+#     local git_symbol=""
+#     local git_color='%B%F{green}'
+#     
+#     # 判断是否 dirty
+#     if [[ -n ${zim_git_info_keys[status]} ]]; then
+#       git_color='%B%F{red}'
+#     fi
+#     
+#     _PROMPT_GIT_INFO=" on ${git_color}${git_symbol} ${zim_git_info_keys[branch]}%f%b"
+#   fi
+# }
+#
+# # 注册钩子
+# autoload -Uz add-zsh-hook
+# add-zsh-hook precmd prompt_nekolight_precmd
+#
+# # 4. 组装 PROMPT
+# # 第一行：路径 + Git信息
+# # 第二行：根据返回状态变色的箭头
+# PROMPT='%B%F{blue}%~%f%b${_PROMPT_GIT_INFO}
+# %(?,%B%F{green}❯%f%b,%B%F{red}❯%f%b) '
+#
+# # 可选：如果你喜欢原版 Bash 样式的右侧提示符，可以用 RPROMPT
+# # RPROMPT=''
